@@ -1,0 +1,21 @@
+{
+  "extends": ["config:recommended"],
+  "labels": ["dependency"],
+  "postUpdateOptions": ["gomodTidy"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": ["GOLANGCI_LINT_VERSION \\?= (?<currentValue>v[^\\s]+)"],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["k8s.io/api", "k8s.io/apimachinery"],
+      "allowedVersions": "< 1.0.0"
+    }
+  ]
+}

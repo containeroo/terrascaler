@@ -1,0 +1,5 @@
+/terrascaler
+bin/
+*.test
+coverage.out
+cover.out

@@ -1,0 +1,76 @@
+---
+version: 2
+project_name: terrascaler
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - main: ./cmd/terrascaler
+    binary: terrascaler
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{ .Tag }}
+dockers:
+  - image_templates:
+      - ghcr.io/containeroo/terrascaler:{{ .Tag }}-amd64
+    use: buildx
+    dockerfile: Dockerfile
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd
+      - internal
+    build_flag_templates:
+      - --pull
+      - --platform=linux/amd64
+      - --build-arg
+      - LDFLAGS=-s -w -X main.Version={{ .Tag }}
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.description=External gRPC cloud provider for Kubernetes Cluster Autoscaler backed by GitLab and Terraform/OpenTofu
+      - --label=org.opencontainers.image.url=https://github.com/containeroo/terrascaler
+      - --label=org.opencontainers.image.source=https://github.com/containeroo/terrascaler
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses="GNU General Public License v3.0"
+  - image_templates:
+      - ghcr.io/containeroo/terrascaler:{{ .Tag }}-arm64
+    use: buildx
+    dockerfile: Dockerfile
+    extra_files:
+      - go.mod
+      - go.sum
+      - cmd
+      - internal
+    goarch: arm64
+    build_flag_templates:
+      - --pull
+      - --platform=linux/arm64
+      - --build-arg
+      - LDFLAGS=-s -w -X main.Version={{ .Tag }}
+      - --label=org.opencontainers.image.title={{ .ProjectName }}
+      - --label=org.opencontainers.image.description=External gRPC cloud provider for Kubernetes Cluster Autoscaler backed by GitLab and Terraform/OpenTofu
+      - --label=org.opencontainers.image.url=https://github.com/containeroo/terrascaler
+      - --label=org.opencontainers.image.source=https://github.com/containeroo/terrascaler
+      - --label=org.opencontainers.image.version={{ .Version }}
+      - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
+      - --label=org.opencontainers.image.revision={{ .FullCommit }}
+      - --label=org.opencontainers.image.licenses="GNU General Public License v3.0"
+docker_manifests:
+  - name_template: ghcr.io/containeroo/terrascaler:{{ .Tag }}
+    image_templates:
+      - ghcr.io/containeroo/terrascaler:{{ .Tag }}-amd64
+      - ghcr.io/containeroo/terrascaler:{{ .Tag }}-arm64
+  - name_template: ghcr.io/containeroo/terrascaler:latest
+    image_templates:
+      - ghcr.io/containeroo/terrascaler:{{ .Tag }}-amd64
+      - ghcr.io/containeroo/terrascaler:{{ .Tag }}-arm64
+release:
+  prerelease: auto
