@@ -10,6 +10,8 @@ import (
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type NodeGroup struct {
@@ -275,7 +277,8 @@ func (m *NodeGroupTemplateNodeInfoRequest) String() string { return proto.Compac
 func (*NodeGroupTemplateNodeInfoRequest) ProtoMessage()    {}
 
 type NodeGroupTemplateNodeInfoResponse struct {
-	NodeBytes []byte `protobuf:"bytes,2,opt,name=nodeBytes,proto3" json:"nodeBytes,omitempty"`
+	NodeInfo  *corev1.Node `protobuf:"bytes,1,opt,name=nodeInfo,proto3" json:"nodeInfo,omitempty"`
+	NodeBytes []byte       `protobuf:"bytes,2,opt,name=nodeBytes,proto3" json:"nodeBytes,omitempty"`
 }
 
 func (m *NodeGroupTemplateNodeInfoResponse) Reset()         { *m = NodeGroupTemplateNodeInfoResponse{} }
@@ -296,6 +299,9 @@ func (*NodeGroupAutoscalingOptionsRequest) ProtoMessage()    {}
 type NodeGroupAutoscalingOptions struct {
 	ScaleDownUtilizationThreshold    float64              `protobuf:"fixed64,1,opt,name=scaleDownUtilizationThreshold,proto3" json:"scaleDownUtilizationThreshold,omitempty"`
 	ScaleDownGpuUtilizationThreshold float64              `protobuf:"fixed64,2,opt,name=scaleDownGpuUtilizationThreshold,proto3" json:"scaleDownGpuUtilizationThreshold,omitempty"`
+	ScaleDownUnneededTime            *metav1.Duration     `protobuf:"bytes,3,opt,name=scaleDownUnneededTime,proto3" json:"scaleDownUnneededTime,omitempty"`
+	ScaleDownUnreadyTime             *metav1.Duration     `protobuf:"bytes,4,opt,name=scaleDownUnreadyTime,proto3" json:"scaleDownUnreadyTime,omitempty"`
+	MaxNodeProvisionTime             *metav1.Duration     `protobuf:"bytes,5,opt,name=MaxNodeProvisionTime,proto3" json:"MaxNodeProvisionTime,omitempty"`
 	ZeroOrMaxNodeScaling             bool                 `protobuf:"varint,6,opt,name=zeroOrMaxNodeScaling,proto3" json:"zeroOrMaxNodeScaling,omitempty"`
 	IgnoreDaemonSetsUtilization      bool                 `protobuf:"varint,7,opt,name=ignoreDaemonSetsUtilization,proto3" json:"ignoreDaemonSetsUtilization,omitempty"`
 	ScaleDownUnneededDuration        *durationpb.Duration `protobuf:"bytes,8,opt,name=scaleDownUnneededDuration,proto3" json:"scaleDownUnneededDuration,omitempty"`

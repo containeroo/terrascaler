@@ -160,7 +160,10 @@ func (s *Server) NodeGroupTemplateNodeInfo(ctx context.Context, req *externalgrp
 		"memory", s.cfg.TemplateMemory,
 		"pods", s.cfg.TemplatePods,
 	)
-	return &externalgrpc.NodeGroupTemplateNodeInfoResponse{NodeBytes: nodeBytes}, nil
+	return &externalgrpc.NodeGroupTemplateNodeInfoResponse{
+		NodeInfo:  node,
+		NodeBytes: nodeBytes,
+	}, nil
 }
 
 func (s *Server) NodeGroupGetOptions(_ context.Context, req *externalgrpc.NodeGroupAutoscalingOptionsRequest) (*externalgrpc.NodeGroupAutoscalingOptionsResponse, error) {
