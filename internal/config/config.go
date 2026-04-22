@@ -50,7 +50,9 @@ type MergeRequestConfig struct {
 	Title              string
 	Description        string
 	Labels             []string
+	AssigneeUsernames  []string
 	AssigneeIDs        []int64
+	ReviewerUsernames  []string
 	ReviewerIDs        []int64
 	RemoveSourceBranch bool
 }
@@ -61,7 +63,9 @@ func Load() (Config, error) {
 	var nodeSelector string
 	var templateLabels string
 	var mrLabels string
+	var mrAssigneeUsernames string
 	var mrAssigneeIDs string
+	var mrReviewerUsernames string
 	var mrReviewerIDs string
 
 	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -81,7 +85,9 @@ func Load() (Config, error) {
 	flags.StringVar(&cfg.GitLabMR.Title, "gitlab-mr-title", env("TERRASCALER_GITLAB_MR_TITLE", "terrascaler: scale worker count"), "GitLab merge request title")
 	flags.StringVar(&cfg.GitLabMR.Description, "gitlab-mr-description", env("TERRASCALER_GITLAB_MR_DESCRIPTION", "Automated Terrascaler scale-up proposal."), "GitLab merge request description")
 	flags.StringVar(&mrLabels, "gitlab-mr-labels", env("TERRASCALER_GITLAB_MR_LABELS", "terrascaler"), "Comma-separated GitLab merge request labels")
+	flags.StringVar(&mrAssigneeUsernames, "gitlab-mr-assignees", env("TERRASCALER_GITLAB_MR_ASSIGNEES", ""), "Comma-separated GitLab usernames to assign to created merge requests")
 	flags.StringVar(&mrAssigneeIDs, "gitlab-mr-assignee-ids", env("TERRASCALER_GITLAB_MR_ASSIGNEE_IDS", ""), "Comma-separated GitLab user IDs to assign to created merge requests")
+	flags.StringVar(&mrReviewerUsernames, "gitlab-mr-reviewers", env("TERRASCALER_GITLAB_MR_REVIEWERS", ""), "Comma-separated GitLab usernames to request review from on created merge requests")
 	flags.StringVar(&mrReviewerIDs, "gitlab-mr-reviewer-ids", env("TERRASCALER_GITLAB_MR_REVIEWER_IDS", ""), "Comma-separated GitLab user IDs to request review from on created merge requests")
 	flags.BoolVar(&cfg.GitLabMR.RemoveSourceBranch, "gitlab-mr-remove-source-branch", envBool("TERRASCALER_GITLAB_MR_REMOVE_SOURCE_BRANCH", true), "Remove source branch when the GitLab merge request is merged")
 	flags.StringVar(&cfg.FilePath, "file", env("TERRASCALER_FILE", ""), "Terraform file path in the repository")
@@ -104,7 +110,9 @@ func Load() (Config, error) {
 	cfg.NodeSelector = parseMap(nodeSelector)
 	cfg.TemplateLabels = parseMap(templateLabels)
 	cfg.GitLabMR.Labels = splitCSV(mrLabels)
+	cfg.GitLabMR.AssigneeUsernames = splitCSV(mrAssigneeUsernames)
 	cfg.GitLabMR.AssigneeIDs = parseInt64CSV(mrAssigneeIDs)
+	cfg.GitLabMR.ReviewerUsernames = splitCSV(mrReviewerUsernames)
 	cfg.GitLabMR.ReviewerIDs = parseInt64CSV(mrReviewerIDs)
 
 	if err := cfg.Validate(); err != nil {

@@ -50,7 +50,9 @@ All settings can be passed as flags or environment variables.
 | `--gitlab-mr-title` | `TERRASCALER_GITLAB_MR_TITLE` | no | `terrascaler: scale worker count` | Merge request title |
 | `--gitlab-mr-description` | `TERRASCALER_GITLAB_MR_DESCRIPTION` | no | automated proposal text | Merge request description prefix |
 | `--gitlab-mr-labels` | `TERRASCALER_GITLAB_MR_LABELS` | no | `terrascaler` | Comma-separated merge request labels |
+| `--gitlab-mr-assignees` | `TERRASCALER_GITLAB_MR_ASSIGNEES` | no | | Comma-separated GitLab usernames to assign |
 | `--gitlab-mr-assignee-ids` | `TERRASCALER_GITLAB_MR_ASSIGNEE_IDS` | no | | Comma-separated GitLab user IDs to assign |
+| `--gitlab-mr-reviewers` | `TERRASCALER_GITLAB_MR_REVIEWERS` | no | | Comma-separated GitLab usernames to request review from |
 | `--gitlab-mr-reviewer-ids` | `TERRASCALER_GITLAB_MR_REVIEWER_IDS` | no | | Comma-separated GitLab user IDs to request review from |
 | `--gitlab-mr-remove-source-branch` | `TERRASCALER_GITLAB_MR_REMOVE_SOURCE_BRANCH` | no | `true` | Remove MR source branch after merge |
 | `--file`                | `TERRASCALER_FILE`                | yes      |                   | Terraform file path in the repository                                           |
@@ -126,8 +128,13 @@ evaluate them from a single file.
 
 By default Terrascaler commits directly to `--gitlab-branch`. With
 `--gitlab-merge-request`, Terrascaler creates a branch from the target branch,
-commits the Terraform change there, and opens a GitLab merge request. Optional
-assignee and reviewer settings use GitLab numeric user IDs.
+commits the Terraform change there, and opens a GitLab merge request.
+
+Use `--gitlab-mr-assignees` and `--gitlab-mr-reviewers` for comma-separated
+GitLab usernames. Terrascaler resolves each username against the configured
+project members before creating the merge request. Numeric GitLab user IDs are
+also supported through `--gitlab-mr-assignee-ids` and
+`--gitlab-mr-reviewer-ids`.
 
 ## Development
 

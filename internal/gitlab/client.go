@@ -31,7 +31,9 @@ type MergeRequestConfig struct {
 	Title              string
 	Description        string
 	Labels             []string
+	AssigneeUsernames  []string
 	AssigneeIDs        []int64
+	ReviewerUsernames  []string
 	ReviewerIDs        []int64
 	RemoveSourceBranch bool
 }
@@ -368,11 +370,19 @@ func (c *Client) ensureMergeRequest(ctx context.Context, branch string, current 
 		labels := gl.LabelOptions(c.cfg.MR.Labels)
 		options.Labels = &labels
 	}
-	if len(c.cfg.MR.AssigneeIDs) > 0 {
-		options.AssigneeIDs = gl.Ptr(c.cfg.MR.AssigneeIDs)
+	assigneeIDs, err := c.mergeRequestUserIDs(ctx, "assignee", c.cfg.MR.AssigneeUsernames, c.cfg.MR.AssigneeIDs)
+	if err != nil {
+		return err
 	}
-	if len(c.cfg.MR.ReviewerIDs) > 0 {
-		options.ReviewerIDs = gl.Ptr(c.cfg.MR.ReviewerIDs)
+	if len(assigneeIDs) > 0 {
+		options.AssigneeIDs = gl.Ptr(assigneeIDs)
+	}
+	reviewerIDs, err := c.mergeRequestUserIDs(ctx, "reviewer", c.cfg.MR.ReviewerUsernames, c.cfg.MR.ReviewerIDs)
+	if err != nil {
+		return err
+	}
+	if len(reviewerIDs) > 0 {
+		options.ReviewerIDs = gl.Ptr(reviewerIDs)
 	}
 
 	mergeRequest, _, err := c.api.MergeRequests.CreateMergeRequest(c.cfg.Project, options, gl.WithContext(ctx))
@@ -387,6 +397,54 @@ func (c *Client) ensureMergeRequest(ctx context.Context, branch string, current 
 		"merge_request_url", mergeRequest.WebURL,
 	)
 	return nil
+}
+
+func (c *Client) mergeRequestUserIDs(ctx context.Context, role string, usernames []string, ids []int64) ([]int64, error) {
+	out := append([]int64(nil), ids...)
+	for _, username := range usernames {
+		username = normalizeUsername(username)
+		if username == "" {
+			continue
+		}
+		id, err := c.projectMemberID(ctx, username)
+		if err != nil {
+			return nil, fmt.Errorf("resolve GitLab merge request %s %q: %w", role, username, err)
+		}
+		out = append(out, id)
+	}
+	return uniqueInt64(out), nil
+}
+
+func (c *Client) projectMemberID(ctx context.Context, username string) (int64, error) {
+	members, _, err := c.api.ProjectMembers.ListAllProjectMembers(c.cfg.Project, &gl.ListProjectMembersOptions{
+		Query: gl.Ptr(username),
+	}, gl.WithContext(ctx))
+	if err != nil {
+		return 0, fmt.Errorf("list GitLab project members: %w", err)
+	}
+	for _, member := range members {
+		if member != nil && member.Username == username {
+			return member.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("project member not found")
+}
+
+func normalizeUsername(username string) string {
+	return strings.TrimPrefix(strings.TrimSpace(username), "@")
+}
+
+func uniqueInt64(values []int64) []int64 {
+	seen := map[int64]struct{}{}
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (c *Client) mergeRequestBranch(next int) string {

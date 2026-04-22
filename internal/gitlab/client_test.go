@@ -55,3 +55,33 @@ func TestMergeRequestDescription(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeUsername(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   string
+		want string
+	}{
+		"plain":  {in: "alice", want: "alice"},
+		"at":     {in: "@alice", want: "alice"},
+		"spaces": {in: " @alice ", want: "alice"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := normalizeUsername(tc.in); got != tc.want {
+				t.Fatalf("normalizeUsername(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUniqueInt64(t *testing.T) {
+	got := uniqueInt64([]int64{7, 8, 7, 9, 8})
+	want := []int64{7, 8, 9}
+	if len(got) != len(want) {
+		t.Fatalf("uniqueInt64() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("uniqueInt64() = %v, want %v", got, want)
+		}
+	}
+}
