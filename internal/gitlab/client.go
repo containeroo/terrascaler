@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	gl "gitlab.com/gitlab-org/api/client-go"
@@ -19,8 +20,20 @@ type Config struct {
 	Token   string
 	Project string
 	Branch  string
+	MR      MergeRequestConfig
 	File    string
 	Target  terraform.Target
+}
+
+type MergeRequestConfig struct {
+	Enabled            bool
+	BranchPrefix       string
+	Title              string
+	Description        string
+	Labels             []string
+	AssigneeIDs        []int64
+	ReviewerIDs        []int64
+	RemoveSourceBranch bool
 }
 
 type Client struct {
@@ -131,6 +144,46 @@ func (c *Client) IncreaseTargetSize(ctx context.Context, delta int, validate fun
 	return current, next, err
 }
 
+func (c *Client) SetTargetSize(ctx context.Context, desired int, validate func(current int, next int) error) (int, int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	current, next, err := c.setTargetSizeOnce(ctx, desired, validate)
+	if isRetryableCommitError(err) {
+		c.logger.WarnContext(ctx, "GitLab commit conflict, retrying target size update",
+			"project", c.cfg.Project,
+			"branch", c.cfg.Branch,
+			"file", c.cfg.File,
+			"attribute", c.cfg.Target.Attribute,
+			"desired_size", desired,
+			"error", err,
+		)
+		current, next, err = c.setTargetSizeOnce(ctx, desired, validate)
+	}
+	if err != nil {
+		c.logger.ErrorContext(ctx, "GitLab target size update failed",
+			"project", c.cfg.Project,
+			"branch", c.cfg.Branch,
+			"file", c.cfg.File,
+			"attribute", c.cfg.Target.Attribute,
+			"current_size", current,
+			"requested_size", next,
+			"error", err,
+		)
+		return current, next, err
+	}
+
+	c.logger.InfoContext(ctx, "GitLab target size update completed",
+		"project", c.cfg.Project,
+		"branch", c.cfg.Branch,
+		"file", c.cfg.File,
+		"attribute", c.cfg.Target.Attribute,
+		"previous_size", current,
+		"target_size", next,
+	)
+	return current, next, nil
+}
+
 func (c *Client) increaseTargetSizeOnce(ctx context.Context, delta int, validate func(current int, next int) error) (int, int, error) {
 	content, lastCommitID, err := c.fetch(ctx)
 	if err != nil {
@@ -143,10 +196,31 @@ func (c *Client) increaseTargetSizeOnce(ctx context.Context, delta int, validate
 	}
 
 	next := current + delta
+	return c.updateTargetSize(ctx, content, lastCommitID, current, next, validate)
+}
+
+func (c *Client) setTargetSizeOnce(ctx context.Context, desired int, validate func(current int, next int) error) (int, int, error) {
+	content, lastCommitID, err := c.fetch(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	current, err := terraform.ReadInt(c.cfg.File, content, c.cfg.Target)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return c.updateTargetSize(ctx, content, lastCommitID, current, desired, validate)
+}
+
+func (c *Client) updateTargetSize(ctx context.Context, content []byte, lastCommitID string, current int, next int, validate func(current int, next int) error) (int, int, error) {
 	if validate != nil {
 		if err := validate(current, next); err != nil {
 			return current, next, err
 		}
+	}
+	if next == current {
+		return current, next, nil
 	}
 
 	updated, err := terraform.SetInt(c.cfg.File, content, c.cfg.Target, next)
@@ -158,9 +232,49 @@ func (c *Client) increaseTargetSizeOnce(ctx context.Context, delta int, validate
 	}
 
 	message := fmt.Sprintf("terrascaler: scale %s from %d to %d", c.cfg.Target.Attribute, current, next)
+	branch := c.cfg.Branch
+	if c.cfg.MR.Enabled {
+		branch = c.mergeRequestBranch(next)
+		if err := c.ensureMergeRequestBranch(ctx, branch); err != nil {
+			return 0, 0, err
+		}
+		content, lastCommitID, err = c.fetchRef(ctx, branch)
+		if err != nil {
+			return 0, 0, err
+		}
+		branchCurrent, err := terraform.ReadInt(c.cfg.File, content, c.cfg.Target)
+		if err != nil {
+			return 0, 0, err
+		}
+		if branchCurrent == next {
+			if err := c.ensureMergeRequest(ctx, branch, current, next); err != nil {
+				return 0, 0, err
+			}
+			c.logger.InfoContext(ctx, "GitLab merge request branch already has requested target size",
+				"project", c.cfg.Project,
+				"branch", branch,
+				"target_branch", c.cfg.Branch,
+				"file", c.cfg.File,
+				"attribute", c.cfg.Target.Attribute,
+				"base_size", current,
+				"target_size", next,
+			)
+			return current, next, nil
+		}
+		updated, err = terraform.SetInt(c.cfg.File, content, c.cfg.Target, next)
+		if err != nil {
+			return 0, 0, err
+		}
+		if string(updated) == string(content) {
+			return current, next, nil
+		}
+	}
+
 	c.logger.InfoContext(ctx, "committing Terraform target size update",
 		"project", c.cfg.Project,
-		"branch", c.cfg.Branch,
+		"branch", branch,
+		"target_branch", c.cfg.Branch,
+		"merge_request", c.cfg.MR.Enabled,
 		"file", c.cfg.File,
 		"attribute", c.cfg.Target.Attribute,
 		"previous_size", current,
@@ -169,7 +283,7 @@ func (c *Client) increaseTargetSizeOnce(ctx context.Context, delta int, validate
 	)
 
 	options := &gl.UpdateFileOptions{
-		Branch:        gl.Ptr(c.cfg.Branch),
+		Branch:        gl.Ptr(branch),
 		Content:       gl.Ptr(string(updated)),
 		CommitMessage: gl.Ptr(message),
 		LastCommitID:  gl.Ptr(lastCommitID),
@@ -178,9 +292,16 @@ func (c *Client) increaseTargetSizeOnce(ctx context.Context, delta int, validate
 	if err != nil {
 		return 0, 0, fmt.Errorf("update GitLab file %s: %w", c.cfg.File, err)
 	}
+	if c.cfg.MR.Enabled {
+		if err := c.ensureMergeRequest(ctx, branch, current, next); err != nil {
+			return 0, 0, err
+		}
+	}
 	c.logger.InfoContext(ctx, "committed Terraform target size update",
 		"project", c.cfg.Project,
-		"branch", c.cfg.Branch,
+		"branch", branch,
+		"target_branch", c.cfg.Branch,
+		"merge_request", c.cfg.MR.Enabled,
 		"file", c.cfg.File,
 		"attribute", c.cfg.Target.Attribute,
 		"previous_size", current,
@@ -189,9 +310,134 @@ func (c *Client) increaseTargetSizeOnce(ctx context.Context, delta int, validate
 	return current, next, nil
 }
 
+func (c *Client) ensureMergeRequestBranch(ctx context.Context, branch string) error {
+	if _, _, err := c.api.Branches.GetBranch(c.cfg.Project, branch, gl.WithContext(ctx)); err == nil {
+		return nil
+	} else if !isNotFoundError(err) {
+		return fmt.Errorf("get GitLab branch %s: %w", branch, err)
+	}
+
+	c.logger.InfoContext(ctx, "creating GitLab merge request branch",
+		"project", c.cfg.Project,
+		"branch", branch,
+		"ref", c.cfg.Branch,
+	)
+	_, _, err := c.api.Branches.CreateBranch(c.cfg.Project, &gl.CreateBranchOptions{
+		Branch: gl.Ptr(branch),
+		Ref:    gl.Ptr(c.cfg.Branch),
+	}, gl.WithContext(ctx))
+	if err != nil && !isBranchAlreadyExistsError(err) {
+		return fmt.Errorf("create GitLab branch %s: %w", branch, err)
+	}
+	return nil
+}
+
+func (c *Client) ensureMergeRequest(ctx context.Context, branch string, current int, next int) error {
+	existing, _, err := c.api.MergeRequests.ListProjectMergeRequests(c.cfg.Project, &gl.ListProjectMergeRequestsOptions{
+		State:        gl.Ptr("opened"),
+		SourceBranch: gl.Ptr(branch),
+		TargetBranch: gl.Ptr(c.cfg.Branch),
+	}, gl.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("list GitLab merge requests: %w", err)
+	}
+	if len(existing) > 0 {
+		c.logger.InfoContext(ctx, "GitLab merge request already exists",
+			"project", c.cfg.Project,
+			"source_branch", branch,
+			"target_branch", c.cfg.Branch,
+			"merge_request_iid", existing[0].IID,
+		)
+		return nil
+	}
+
+	title := c.cfg.MR.Title
+	if title == "" {
+		title = fmt.Sprintf("terrascaler: scale %s to %d", c.cfg.Target.Attribute, next)
+	}
+	description := c.mergeRequestDescription(current, next)
+	removeSourceBranch := c.cfg.MR.RemoveSourceBranch
+	options := &gl.CreateMergeRequestOptions{
+		Title:              gl.Ptr(title),
+		Description:        gl.Ptr(description),
+		SourceBranch:       gl.Ptr(branch),
+		TargetBranch:       gl.Ptr(c.cfg.Branch),
+		RemoveSourceBranch: gl.Ptr(removeSourceBranch),
+	}
+	if len(c.cfg.MR.Labels) > 0 {
+		labels := gl.LabelOptions(c.cfg.MR.Labels)
+		options.Labels = &labels
+	}
+	if len(c.cfg.MR.AssigneeIDs) > 0 {
+		options.AssigneeIDs = gl.Ptr(c.cfg.MR.AssigneeIDs)
+	}
+	if len(c.cfg.MR.ReviewerIDs) > 0 {
+		options.ReviewerIDs = gl.Ptr(c.cfg.MR.ReviewerIDs)
+	}
+
+	mergeRequest, _, err := c.api.MergeRequests.CreateMergeRequest(c.cfg.Project, options, gl.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("create GitLab merge request: %w", err)
+	}
+	c.logger.InfoContext(ctx, "created GitLab merge request",
+		"project", c.cfg.Project,
+		"source_branch", branch,
+		"target_branch", c.cfg.Branch,
+		"merge_request_iid", mergeRequest.IID,
+		"merge_request_url", mergeRequest.WebURL,
+	)
+	return nil
+}
+
+func (c *Client) mergeRequestBranch(next int) string {
+	prefix := strings.Trim(strings.TrimSpace(c.cfg.MR.BranchPrefix), "/")
+	if prefix == "" {
+		prefix = "terrascaler/scale"
+	}
+	return fmt.Sprintf("%s-%s-to-%d", prefix, sanitizeBranchPart(c.cfg.Target.Attribute), next)
+}
+
+func (c *Client) mergeRequestDescription(current int, next int) string {
+	description := strings.TrimSpace(c.cfg.MR.Description)
+	if description == "" {
+		description = "Automated Terrascaler scale-up proposal."
+	}
+	return fmt.Sprintf(`%s
+
+Terrascaler proposes increasing %s from %d to %d.
+
+- Target branch: %s
+- Terraform file: %s
+- Terraform target: %s %v %s
+`, description, c.cfg.Target.Attribute, current, next, c.cfg.Branch, c.cfg.File, c.cfg.Target.BlockType, c.cfg.Target.Labels, c.cfg.Target.Attribute)
+}
+
+func sanitizeBranchPart(value string) string {
+	value = strings.ToLower(value)
+	var builder strings.Builder
+	previousDash := false
+	for _, char := range value {
+		valid := (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
+		if valid {
+			builder.WriteRune(char)
+			previousDash = false
+			continue
+		}
+		if !previousDash {
+			builder.WriteRune('-')
+			previousDash = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
 func (c *Client) fetch(ctx context.Context) ([]byte, string, error) {
+	return c.fetchRef(ctx, c.cfg.Branch)
+}
+
+func (c *Client) fetchRef(ctx context.Context, ref string) ([]byte, string, error) {
 	file, _, err := c.api.RepositoryFiles.GetFile(c.cfg.Project, c.cfg.File, &gl.GetFileOptions{
-		Ref: gl.Ptr(c.cfg.Branch),
+		Ref: gl.Ptr(ref),
 	}, gl.WithContext(ctx))
 	if err != nil {
 		return nil, "", fmt.Errorf("fetch GitLab file %s: %w", c.cfg.File, err)
@@ -215,4 +461,20 @@ func isRetryableCommitError(err error) bool {
 				responseErr.Response.StatusCode == http.StatusConflict)
 	}
 	return false
+}
+
+func isNotFoundError(err error) bool {
+	var responseErr *gl.ErrorResponse
+	return errors.As(err, &responseErr) &&
+		responseErr.Response != nil &&
+		responseErr.Response.StatusCode == http.StatusNotFound
+}
+
+func isBranchAlreadyExistsError(err error) bool {
+	var responseErr *gl.ErrorResponse
+	if !errors.As(err, &responseErr) || responseErr.Response == nil {
+		return false
+	}
+	return responseErr.Response.StatusCode == http.StatusBadRequest &&
+		strings.Contains(strings.ToLower(responseErr.Message), "branch already exists")
 }

@@ -1,21 +1,23 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
+	"context"
 	"errors"
 	"log"
 	"log/slog"
-	"net"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/containeroo/terrascaler/internal/autoscaler"
 	"github.com/containeroo/terrascaler/internal/config"
-	"github.com/containeroo/terrascaler/internal/externalgrpc"
 	"github.com/containeroo/terrascaler/internal/gitlab"
-	"github.com/containeroo/terrascaler/internal/provider"
 	"github.com/containeroo/terrascaler/internal/terraform"
 )
 
@@ -32,12 +34,31 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
+	kubeConfig, err := loadKubeConfig(cfg.Kubeconfig)
+	if err != nil {
+		log.Fatalf("load Kubernetes config: %v", err)
+	}
+	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		log.Fatalf("create Kubernetes client: %v", err)
+	}
+
 	gitlabClient, err := gitlab.New(gitlab.Config{
 		BaseURL: cfg.GitLabBaseURL,
 		Token:   cfg.GitLabToken,
 		Project: cfg.GitLabProject,
 		Branch:  cfg.GitLabBranch,
-		File:    cfg.FilePath,
+		MR: gitlab.MergeRequestConfig{
+			Enabled:            cfg.GitLabMR.Enabled,
+			BranchPrefix:       cfg.GitLabMR.BranchPrefix,
+			Title:              cfg.GitLabMR.Title,
+			Description:        cfg.GitLabMR.Description,
+			Labels:             cfg.GitLabMR.Labels,
+			AssigneeIDs:        cfg.GitLabMR.AssigneeIDs,
+			ReviewerIDs:        cfg.GitLabMR.ReviewerIDs,
+			RemoveSourceBranch: cfg.GitLabMR.RemoveSourceBranch,
+		},
+		File: cfg.FilePath,
 		Target: terraform.Target{
 			BlockType: cfg.BlockType,
 			Labels:    cfg.Labels,
@@ -48,68 +69,89 @@ func main() {
 		log.Fatalf("create GitLab client: %v", err)
 	}
 
-	listener, err := net.Listen("tcp", cfg.ListenAddress)
+	runner, err := autoscaler.NewRunner(cfg, kubeClient, gitlabClient, logger.With("component", "autoscaler"))
 	if err != nil {
-		log.Fatalf("listen on %s: %v", cfg.ListenAddress, err)
+		log.Fatalf("create autoscaler: %v", err)
 	}
+	runner.SetMetrics(autoscaler.NewMetrics(nil))
 
-	serverOptions, err := grpcServerOptions(cfg)
-	if err != nil {
-		log.Fatalf("configure gRPC server: %v", err)
-	}
-
-	grpcServer := grpc.NewServer(serverOptions...)
-	providerServer := provider.New(cfg, gitlabClient, logger.With("component", "provider"))
-	externalgrpc.RegisterCloudProviderServer(grpcServer, providerServer)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	logger.Info("starting terrascaler",
 		"version", Version,
-		"listen_address", cfg.ListenAddress,
-		"node_group", cfg.NodeGroupID,
+		"check_interval", cfg.CheckInterval.String(),
+		"scale_up_cooldown", cfg.ScaleUpCooldown.String(),
+		"pending_pod_min_age", cfg.PendingPodMinAge.String(),
+		"metrics_address", cfg.MetricsAddress,
 		"min_size", cfg.MinSize,
 		"max_size", cfg.MaxSize,
+		"dry_run", cfg.DryRun,
+		"once", cfg.Once,
 		"gitlab_base_url", cfg.GitLabBaseURL,
 		"gitlab_project", cfg.GitLabProject,
 		"gitlab_branch", cfg.GitLabBranch,
+		"gitlab_merge_request", cfg.GitLabMR.Enabled,
+		"gitlab_mr_branch_prefix", cfg.GitLabMR.BranchPrefix,
 		"terraform_file", cfg.FilePath,
 		"terraform_block_type", cfg.BlockType,
 		"terraform_block_labels", cfg.Labels,
 		"terraform_attribute", cfg.Attribute,
-		"tls_enabled", cfg.TLSCertFile != "",
-		"mtls_enabled", cfg.TLSClientCA != "",
+		"node_selector", cfg.NodeSelector,
+		"template_cpu", cfg.TemplateCPU,
+		"template_memory", cfg.TemplateMemory,
+		"template_pods", cfg.TemplatePods,
 	)
-	if err := grpcServer.Serve(listener); err != nil {
-		log.Fatalf("serve gRPC: %v", err)
+
+	metricsServer := startMetricsServer(cfg.MetricsAddress, logger)
+	if metricsServer != nil {
+		defer func() {
+			if err := metricsServer.Shutdown(context.Background()); err != nil {
+				logger.Error("shutdown metrics server", "error", err)
+			}
+		}()
+	}
+
+	if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Fatalf("run autoscaler: %v", err)
 	}
 }
 
-func grpcServerOptions(cfg config.Config) ([]grpc.ServerOption, error) {
-	if cfg.TLSCertFile == "" {
-		return nil, nil
+func startMetricsServer(address string, logger *slog.Logger) *http.Server {
+	if address == "" {
+		logger.Info("metrics server disabled")
+		return nil
 	}
 
-	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
-	if err != nil {
-		return nil, err
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	server := &http.Server{
+		Addr:    address,
+		Handler: mux,
 	}
-
-	tlsConfig := &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{cert},
-	}
-
-	if cfg.TLSClientCA != "" {
-		caPEM, err := os.ReadFile(cfg.TLSClientCA)
-		if err != nil {
-			return nil, err
+	go func() {
+		logger.Info("starting metrics server", "address", address)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server failed", "error", err)
 		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, errors.New("failed to parse client CA")
-		}
-		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-		tlsConfig.ClientCAs = pool
+	}()
+	return server
+}
+
+func loadKubeConfig(path string) (*rest.Config, error) {
+	if path != "" {
+		return clientcmd.BuildConfigFromFlags("", path)
 	}
 
-	return []grpc.ServerOption{grpc.Creds(credentials.NewTLS(tlsConfig))}, nil
+	config, err := rest.InClusterConfig()
+	if err == nil {
+		return config, nil
+	}
+
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		loadingRules,
+		&clientcmd.ConfigOverrides{},
+	)
+	return clientConfig.ClientConfig()
 }
