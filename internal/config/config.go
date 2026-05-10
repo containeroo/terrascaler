@@ -15,12 +15,14 @@ import (
 type Config struct {
 	Kubeconfig string
 
-	CheckInterval    time.Duration
-	ScaleUpCooldown  time.Duration
-	PendingPodMinAge time.Duration
-	MetricsAddress   string
-	Once             bool
-	DryRun           bool
+	CheckInterval         time.Duration
+	ScaleUpCooldown       time.Duration
+	ScaleDownCooldown     time.Duration
+	ScaleDownUnneededTime time.Duration
+	PendingPodMinAge      time.Duration
+	MetricsAddress        string
+	Once                  bool
+	DryRun                bool
 
 	GitLabBaseURL string
 	GitLabToken   string
@@ -72,6 +74,8 @@ func Load() (Config, error) {
 	flags.StringVar(&cfg.Kubeconfig, "kubeconfig", env("KUBECONFIG", ""), "Path to kubeconfig; leave empty to use in-cluster config")
 	flags.DurationVar(&cfg.CheckInterval, "check-interval", envDuration("TERRASCALER_CHECK_INTERVAL", time.Minute), "Autoscaling check interval")
 	flags.DurationVar(&cfg.ScaleUpCooldown, "scale-up-cooldown", envDuration("TERRASCALER_SCALE_UP_COOLDOWN", 5*time.Minute), "Minimum time between scale-up commits")
+	flags.DurationVar(&cfg.ScaleDownCooldown, "scale-down-cooldown", envDuration("TERRASCALER_SCALE_DOWN_COOLDOWN", 10*time.Minute), "Minimum time between scale-down commits")
+	flags.DurationVar(&cfg.ScaleDownUnneededTime, "scale-down-unneeded-time", envDuration("TERRASCALER_SCALE_DOWN_UNNEEDED_TIME", 10*time.Minute), "How long removable capacity must remain stable before scaling down")
 	flags.DurationVar(&cfg.PendingPodMinAge, "pending-pod-min-age", envDuration("TERRASCALER_PENDING_POD_MIN_AGE", 30*time.Second), "Minimum age for pending pods without an Unschedulable condition")
 	flags.StringVar(&cfg.MetricsAddress, "metrics-address", env("TERRASCALER_METRICS_ADDRESS", ":8080"), "Prometheus metrics listen address; empty disables metrics HTTP server")
 	flags.BoolVar(&cfg.Once, "once", envBool("TERRASCALER_ONCE", false), "Run one autoscaling check and exit")
@@ -142,6 +146,12 @@ func (c Config) Validate() error {
 	}
 	if c.ScaleUpCooldown < 0 {
 		return errors.New("scale-up-cooldown must be >= 0")
+	}
+	if c.ScaleDownCooldown < 0 {
+		return errors.New("scale-down-cooldown must be >= 0")
+	}
+	if c.ScaleDownUnneededTime < 0 {
+		return errors.New("scale-down-unneeded-time must be >= 0")
 	}
 	if c.PendingPodMinAge < 0 {
 		return errors.New("pending-pod-min-age must be >= 0")

@@ -11,7 +11,8 @@ Terrascaler runs its own reduced autoscaling loop:
 3. Find pending unscheduled pods.
 4. Estimate whether those pods fit on current worker capacity.
 5. If not, compute how many worker nodes are needed.
-6. Commit the updated Terraform worker count to GitLab.
+6. If excess worker capacity stays removable long enough, compute a lower worker target.
+7. Commit the updated Terraform worker count to GitLab.
 
 The GitLab commit is expected to trigger the repository's CI pipeline, which then
 runs Terraform/OpenTofu and adds workers.
@@ -20,12 +21,11 @@ runs Terraform/OpenTofu and adds workers.
 
 Terrascaler intentionally supports a narrow feature set:
 
-- scale up only
+- conservative scale up and scale down
 - one Terraform-managed worker group
 - CPU, memory, and pod-count bin packing
 - optional node label selector for Terraform-managed workers
 - no cloud provider integrations
-- no scale down
 - no expander strategies, priorities, balancing, or pricing logic
 
 ## Configuration
@@ -37,6 +37,8 @@ All settings can be passed as flags or environment variables.
 | `--kubeconfig`          | `KUBECONFIG`                      | no       | in-cluster config | Path to kubeconfig                                                              |
 | `--check-interval`      | `TERRASCALER_CHECK_INTERVAL`      | no       | `1m`              | Autoscaling check interval                                                      |
 | `--scale-up-cooldown`   | `TERRASCALER_SCALE_UP_COOLDOWN`   | no       | `5m`              | Minimum time between scale-up commits                                           |
+| `--scale-down-cooldown` | `TERRASCALER_SCALE_DOWN_COOLDOWN` | no       | `10m`             | Minimum time between scale-down commits                                         |
+| `--scale-down-unneeded-time` | `TERRASCALER_SCALE_DOWN_UNNEEDED_TIME` | no | `10m` | How long removable capacity must remain stable before scaling down |
 | `--pending-pod-min-age` | `TERRASCALER_PENDING_POD_MIN_AGE` | no       | `30s`             | Minimum age for pending pods without an Unschedulable condition                 |
 | `--metrics-address`     | `TERRASCALER_METRICS_ADDRESS`     | no       | `:8080`           | Prometheus metrics listen address; empty disables metrics                       |
 | `--once`                | `TERRASCALER_ONCE`                | no       | `false`           | Run one autoscaling check and exit                                              |
@@ -106,6 +108,12 @@ not fit are packed onto synthetic nodes using `--template-cpu`,
 `--template-memory`, and `--template-pods`. The number of synthetic nodes needed
 is added to the current Terraform target, capped at `--max-size`.
 
+For scale-down, Terrascaler simulates packing the scheduled workload on matching
+ready nodes back onto template-sized nodes. If the workload fits on fewer nodes,
+Terrascaler computes a lower target, never below `--min-size`. That lower target
+must remain stable for at least `--scale-down-unneeded-time` before Terrascaler
+commits it, and scale-down commits are rate-limited by `--scale-down-cooldown`.
+
 ## Monitoring
 
 Terrascaler exposes Prometheus metrics on `/metrics` at `--metrics-address`.
@@ -113,11 +121,12 @@ Terrascaler exposes Prometheus metrics on `/metrics` at `--metrics-address`.
 Important metrics:
 
 - `terrascaler_scale_down_potential_nodes`: approximate number of nodes that may
-  be removable. Terrascaler only reports this and does not scale down.
+  be removable according to the current simulation.
 - `terrascaler_current_target_nodes`: current Terraform target node count.
 - `terrascaler_desired_target_nodes`: desired target node count from the latest
   plan.
 - `terrascaler_new_nodes_required`: new nodes needed by the latest plan.
+- `terrascaler_nodes_to_remove`: nodes removable by the latest plan.
 - `terrascaler_last_check_success`: `1` when the last check succeeded.
 
 The target Terraform value must be a literal integer. Values such as

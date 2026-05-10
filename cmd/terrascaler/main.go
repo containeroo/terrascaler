@@ -84,6 +84,8 @@ func main() {
 		"version", Version,
 		"check_interval", cfg.CheckInterval.String(),
 		"scale_up_cooldown", cfg.ScaleUpCooldown.String(),
+		"scale_down_cooldown", cfg.ScaleDownCooldown.String(),
+		"scale_down_unneeded_time", cfg.ScaleDownUnneededTime.String(),
 		"pending_pod_min_age", cfg.PendingPodMinAge.String(),
 		"metrics_address", cfg.MetricsAddress,
 		"min_size", cfg.MinSize,

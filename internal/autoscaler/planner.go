@@ -11,6 +11,7 @@ type Plan struct {
 	CurrentTarget           int
 	DesiredTarget           int
 	NewNodes                int
+	RemoveNodes             int
 	PendingPods             int
 	UnscheduledPods         int
 	UnschedulablePods       int
@@ -43,14 +44,18 @@ func BuildPlan(
 	}
 	if newNodes > 0 {
 		desired = currentTarget + newNodes
+	} else if scaleDownPotential > 0 {
+		desired = maxInt(minSize, currentTarget-scaleDownPotential)
 	}
 	if desired > maxSize {
 		desired = maxSize
 	}
 
-	reason := "no_scale_up_needed"
+	reason := "no_scale_needed"
 	if currentTarget < minSize {
 		reason = "min_size_enforced"
+	} else if desired < currentTarget {
+		reason = "scale_down_needed"
 	} else if len(pending) == 0 {
 		reason = "no_unschedulable_pods"
 	} else if newNodes > 0 && desired > currentTarget {
@@ -63,6 +68,7 @@ func BuildPlan(
 		CurrentTarget:           currentTarget,
 		DesiredTarget:           desired,
 		NewNodes:                maxInt(0, desired-currentTarget),
+		RemoveNodes:             maxInt(0, currentTarget-desired),
 		PendingPods:             countPendingUnscheduled(pods),
 		UnscheduledPods:         len(pending),
 		UnschedulablePods:       countUnschedulable(pending),

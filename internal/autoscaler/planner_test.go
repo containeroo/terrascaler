@@ -26,8 +26,11 @@ func TestBuildPlanUsesExistingNodeCapacityBeforeScaling(t *testing.T) {
 	if plan.NewNodes != 0 {
 		t.Fatalf("NewNodes = %d, want 0", plan.NewNodes)
 	}
-	if plan.Reason != "no_scale_up_needed" {
-		t.Fatalf("Reason = %q, want no_scale_up_needed", plan.Reason)
+	if plan.RemoveNodes != 0 {
+		t.Fatalf("RemoveNodes = %d, want 0", plan.RemoveNodes)
+	}
+	if plan.Reason != "no_scale_needed" {
+		t.Fatalf("Reason = %q, want no_scale_needed", plan.Reason)
 	}
 }
 
@@ -85,6 +88,15 @@ func TestBuildPlanReportsScaleDownPotential(t *testing.T) {
 	if plan.ScaleDownPotentialNodes != 2 {
 		t.Fatalf("ScaleDownPotentialNodes = %d, want 2", plan.ScaleDownPotentialNodes)
 	}
+	if plan.RemoveNodes != 2 {
+		t.Fatalf("RemoveNodes = %d, want 2", plan.RemoveNodes)
+	}
+	if plan.DesiredTarget != 1 {
+		t.Fatalf("DesiredTarget = %d, want 1", plan.DesiredTarget)
+	}
+	if plan.Reason != "scale_down_needed" {
+		t.Fatalf("Reason = %q, want scale_down_needed", plan.Reason)
+	}
 }
 
 func TestBuildPlanDoesNotReportScaleDownPotentialWithPendingPods(t *testing.T) {
@@ -104,6 +116,9 @@ func TestBuildPlanDoesNotReportScaleDownPotentialWithPendingPods(t *testing.T) {
 	if plan.ScaleDownPotentialNodes != 0 {
 		t.Fatalf("ScaleDownPotentialNodes = %d, want 0", plan.ScaleDownPotentialNodes)
 	}
+	if plan.RemoveNodes != 0 {
+		t.Fatalf("RemoveNodes = %d, want 0", plan.RemoveNodes)
+	}
 }
 
 func TestBuildPlanDoesNotReportScaleDownPotentialWhenRunningPodDoesNotFitTemplate(t *testing.T) {
@@ -121,6 +136,31 @@ func TestBuildPlanDoesNotReportScaleDownPotentialWhenRunningPodDoesNotFitTemplat
 
 	if plan.ScaleDownPotentialNodes != 0 {
 		t.Fatalf("ScaleDownPotentialNodes = %d, want 0", plan.ScaleDownPotentialNodes)
+	}
+	if plan.RemoveNodes != 0 {
+		t.Fatalf("RemoveNodes = %d, want 0", plan.RemoveNodes)
+	}
+}
+
+func TestBuildPlanScaleDownRespectsMinSize(t *testing.T) {
+	now := time.Now()
+	template := Resources{MilliCPU: 2000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}
+	nodes := []corev1.Node{
+		node("node-1", map[string]string{"role": "worker"}, template),
+		node("node-2", map[string]string{"role": "worker"}, template),
+		node("node-3", map[string]string{"role": "worker"}, template),
+	}
+	pods := []corev1.Pod{
+		runningPod("used-a", "node-1", Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
+	}
+
+	plan := BuildPlan(now, nodes, pods, 3, 2, 10, map[string]string{"role": "worker"}, template, time.Minute)
+
+	if plan.DesiredTarget != 2 {
+		t.Fatalf("DesiredTarget = %d, want 2", plan.DesiredTarget)
+	}
+	if plan.RemoveNodes != 1 {
+		t.Fatalf("RemoveNodes = %d, want 1", plan.RemoveNodes)
 	}
 }
 

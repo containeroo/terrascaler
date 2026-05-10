@@ -65,24 +65,89 @@ func TestRunnerDoesNotScaleWhenDryRun(t *testing.T) {
 	}
 }
 
+func TestRunnerScalesDownWhenCapacityRemainsUnneeded(t *testing.T) {
+	cfg := testConfig()
+	cfg.ScaleDownUnneededTime = 0
+	target := &fakeTarget{size: 3}
+	template := Resources{MilliCPU: 1000, Memory: 1024 * 1024 * 1024, Pods: 10}
+	kube := fake.NewSimpleClientset(
+		&corev1.NodeList{Items: []corev1.Node{
+			node("worker-1", map[string]string{"role": "worker"}, template),
+			node("worker-2", map[string]string{"role": "worker"}, template),
+			node("worker-3", map[string]string{"role": "worker"}, template),
+		}},
+		&corev1.PodList{Items: []corev1.Pod{
+			runningPod("used", "worker-1", Resources{MilliCPU: 500, Memory: 128 * 1024 * 1024, Pods: 1}),
+		}},
+	)
+	runner, err := NewRunner(cfg, kube, target, slog.Default())
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	if err := runner.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+
+	if target.size != 1 {
+		t.Fatalf("target.size = %d, want 1", target.size)
+	}
+	if target.setCalls != 1 {
+		t.Fatalf("target.setCalls = %d, want 1", target.setCalls)
+	}
+}
+
+func TestRunnerWaitsForScaleDownUnneededTime(t *testing.T) {
+	cfg := testConfig()
+	cfg.ScaleDownUnneededTime = time.Hour
+	target := &fakeTarget{size: 2}
+	template := Resources{MilliCPU: 1000, Memory: 1024 * 1024 * 1024, Pods: 10}
+	kube := fake.NewSimpleClientset(
+		&corev1.NodeList{Items: []corev1.Node{
+			node("worker-1", map[string]string{"role": "worker"}, template),
+			node("worker-2", map[string]string{"role": "worker"}, template),
+		}},
+		&corev1.PodList{Items: []corev1.Pod{
+			runningPod("used", "worker-1", Resources{MilliCPU: 500, Memory: 128 * 1024 * 1024, Pods: 1}),
+		}},
+	)
+	runner, err := NewRunner(cfg, kube, target, slog.Default())
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	if err := runner.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+
+	if target.setCalls != 0 {
+		t.Fatalf("target.setCalls = %d, want 0", target.setCalls)
+	}
+	if runner.scaleDownCandidateSince.IsZero() {
+		t.Fatalf("scaleDownCandidateSince was not recorded")
+	}
+}
+
 func testConfig() config.Config {
 	return config.Config{
-		CheckInterval:    time.Minute,
-		ScaleUpCooldown:  0,
-		PendingPodMinAge: time.Minute,
-		GitLabToken:      "token",
-		GitLabProject:    "group/project",
-		GitLabBranch:     "main",
-		FilePath:         "main.tf",
-		BlockType:        "module",
-		Labels:           []string{"hostedcluster"},
-		Attribute:        "worker_count",
-		MinSize:          0,
-		MaxSize:          10,
-		NodeSelector:     map[string]string{"role": "worker"},
-		TemplateCPU:      "1",
-		TemplateMemory:   "1Gi",
-		TemplatePods:     10,
+		CheckInterval:         time.Minute,
+		ScaleUpCooldown:       0,
+		ScaleDownCooldown:     0,
+		ScaleDownUnneededTime: 0,
+		PendingPodMinAge:      time.Minute,
+		GitLabToken:           "token",
+		GitLabProject:         "group/project",
+		GitLabBranch:          "main",
+		FilePath:              "main.tf",
+		BlockType:             "module",
+		Labels:                []string{"hostedcluster"},
+		Attribute:             "worker_count",
+		MinSize:               0,
+		MaxSize:               10,
+		NodeSelector:          map[string]string{"role": "worker"},
+		TemplateCPU:           "1",
+		TemplateMemory:        "1Gi",
+		TemplatePods:          10,
 	}
 }
 

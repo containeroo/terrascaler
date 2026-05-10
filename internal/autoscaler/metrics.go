@@ -10,6 +10,7 @@ type Metrics struct {
 	currentTarget           prometheus.Gauge
 	desiredTarget           prometheus.Gauge
 	newNodes                prometheus.Gauge
+	removeNodes             prometheus.Gauge
 	pendingPods             prometheus.Gauge
 	eligiblePendingPods     prometheus.Gauge
 	unschedulablePods       prometheus.Gauge
@@ -18,6 +19,7 @@ type Metrics struct {
 	lastCheckTimestamp      prometheus.Gauge
 	lastCheckSuccess        prometheus.Gauge
 	scaleUpCommits          prometheus.Counter
+	scaleDownCommits        prometheus.Counter
 }
 
 func NewMetrics(registry prometheus.Registerer) *Metrics {
@@ -38,6 +40,10 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 			Name: "terrascaler_new_nodes_required",
 			Help: "New nodes required for the latest autoscaling plan.",
 		}),
+		removeNodes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "terrascaler_nodes_to_remove",
+			Help: "Nodes removable by the latest autoscaling plan.",
+		}),
 		pendingPods: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "terrascaler_pending_pods",
 			Help: "Pending unscheduled pods observed by Terrascaler.",
@@ -56,7 +62,7 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 		}),
 		scaleDownPotentialNodes: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "terrascaler_scale_down_potential_nodes",
-			Help: "Approximate number of nodes that may be removable. Terrascaler only reports this and does not scale down.",
+			Help: "Approximate number of nodes that may be removable according to Terrascaler's current simulation.",
 		}),
 		lastCheckTimestamp: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "terrascaler_last_check_timestamp_seconds",
@@ -70,12 +76,17 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 			Name: "terrascaler_scale_up_commits_total",
 			Help: "Total number of GitLab target-size update commits requested by Terrascaler.",
 		}),
+		scaleDownCommits: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "terrascaler_scale_down_commits_total",
+			Help: "Total number of GitLab target-size decreases requested by Terrascaler.",
+		}),
 	}
 
 	registry.MustRegister(
 		metrics.currentTarget,
 		metrics.desiredTarget,
 		metrics.newNodes,
+		metrics.removeNodes,
 		metrics.pendingPods,
 		metrics.eligiblePendingPods,
 		metrics.unschedulablePods,
@@ -84,6 +95,7 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 		metrics.lastCheckTimestamp,
 		metrics.lastCheckSuccess,
 		metrics.scaleUpCommits,
+		metrics.scaleDownCommits,
 	)
 	return metrics
 }
@@ -95,6 +107,7 @@ func (m *Metrics) ObservePlan(plan Plan) {
 	m.currentTarget.Set(float64(plan.CurrentTarget))
 	m.desiredTarget.Set(float64(plan.DesiredTarget))
 	m.newNodes.Set(float64(plan.NewNodes))
+	m.removeNodes.Set(float64(plan.RemoveNodes))
 	m.pendingPods.Set(float64(plan.PendingPods))
 	m.eligiblePendingPods.Set(float64(plan.UnscheduledPods))
 	m.unschedulablePods.Set(float64(plan.UnschedulablePods))
@@ -119,4 +132,11 @@ func (m *Metrics) IncScaleUpCommit() {
 		return
 	}
 	m.scaleUpCommits.Inc()
+}
+
+func (m *Metrics) IncScaleDownCommit() {
+	if m == nil {
+		return
+	}
+	m.scaleDownCommits.Inc()
 }
