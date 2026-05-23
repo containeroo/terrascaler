@@ -38,7 +38,7 @@ test: fmt vet ## Run tests.
 	go test ./... -coverprofile cover.out
 
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
-GOLANGCI_LINT_VERSION ?= v2.11.4
+GOLANGCI_LINT_VERSION ?= v2.12.2
 .PHONY: golangci-lint
 golangci-lint: $(LOCALBIN) ## Download golangci-lint locally if necessary.
 	@[ -f $(GOLANGCI_LINT) ] || { \
