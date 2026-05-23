@@ -17,7 +17,7 @@ func TestRunnerScalesTargetWhenPodsDoNotFit(t *testing.T) {
 	target := &fakeTarget{size: 1}
 	kube := fake.NewSimpleClientset(
 		&corev1.NodeList{Items: []corev1.Node{
-			node("worker-1", map[string]string{"role": "worker"}, Resources{MilliCPU: 1000, Memory: 1024 * 1024 * 1024, Pods: 10}),
+			node("worker-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, Resources{MilliCPU: 1000, Memory: 1024 * 1024 * 1024, Pods: 10}),
 		}},
 		&corev1.PodList{Items: []corev1.Pod{
 			runningPod("used", "worker-1", Resources{MilliCPU: 1000, Memory: 128 * 1024 * 1024, Pods: 1}),
@@ -72,9 +72,9 @@ func TestRunnerScalesDownWhenCapacityRemainsUnneeded(t *testing.T) {
 	template := Resources{MilliCPU: 1000, Memory: 1024 * 1024 * 1024, Pods: 10}
 	kube := fake.NewSimpleClientset(
 		&corev1.NodeList{Items: []corev1.Node{
-			node("worker-1", map[string]string{"role": "worker"}, template),
-			node("worker-2", map[string]string{"role": "worker"}, template),
-			node("worker-3", map[string]string{"role": "worker"}, template),
+			node("worker-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+			node("worker-2", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+			node("worker-3", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
 		}},
 		&corev1.PodList{Items: []corev1.Pod{
 			runningPod("used", "worker-1", Resources{MilliCPU: 500, Memory: 128 * 1024 * 1024, Pods: 1}),
@@ -104,8 +104,8 @@ func TestRunnerWaitsForScaleDownUnneededTime(t *testing.T) {
 	template := Resources{MilliCPU: 1000, Memory: 1024 * 1024 * 1024, Pods: 10}
 	kube := fake.NewSimpleClientset(
 		&corev1.NodeList{Items: []corev1.Node{
-			node("worker-1", map[string]string{"role": "worker"}, template),
-			node("worker-2", map[string]string{"role": "worker"}, template),
+			node("worker-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+			node("worker-2", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
 		}},
 		&corev1.PodList{Items: []corev1.Pod{
 			runningPod("used", "worker-1", Resources{MilliCPU: 500, Memory: 128 * 1024 * 1024, Pods: 1}),
@@ -144,7 +144,7 @@ func testConfig() config.Config {
 		Attribute:             "worker_count",
 		MinSize:               0,
 		MaxSize:               10,
-		NodeSelector:          map[string]string{"role": "worker"},
+		NodeSelector:          map[string]string{testNodeRoleLabel: testNodeRoleValue},
 		TemplateCPU:           "1",
 		TemplateMemory:        "1Gi",
 		TemplatePods:          10,
