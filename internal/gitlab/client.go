@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	gl "gitlab.com/gitlab-org/api/client-go"
+	gl "gitlab.com/gitlab-org/api/client-go/v2"
 
 	"github.com/containeroo/terrascaler/internal/terraform"
 )
