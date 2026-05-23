@@ -7,6 +7,8 @@ import (
 	"github.com/containeroo/terrascaler/internal/terraform"
 )
 
+const testUsername = "alice"
+
 func TestMergeRequestBranch(t *testing.T) {
 	client := &Client{
 		cfg: Config{
@@ -61,9 +63,9 @@ func TestNormalizeUsername(t *testing.T) {
 		in   string
 		want string
 	}{
-		"plain":  {in: "alice", want: "alice"},
-		"at":     {in: "@alice", want: "alice"},
-		"spaces": {in: " @alice ", want: "alice"},
+		"plain":  {in: testUsername, want: testUsername},
+		"at":     {in: "@" + testUsername, want: testUsername},
+		"spaces": {in: " @" + testUsername + " ", want: testUsername},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := normalizeUsername(tc.in); got != tc.want {
