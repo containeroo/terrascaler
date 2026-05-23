@@ -9,11 +9,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	testNodeRoleLabel = "role"
+	testNodeRoleValue = "worker"
+)
+
 func TestBuildPlanUsesExistingNodeCapacityBeforeScaling(t *testing.T) {
 	now := time.Now()
 	template := Resources{MilliCPU: 2000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}
 	nodes := []corev1.Node{
-		node("node-1", map[string]string{"role": "worker"}, Resources{MilliCPU: 2000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}),
+		node("node-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, Resources{MilliCPU: 2000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}),
 	}
 	pods := []corev1.Pod{
 		runningPod("used", "node-1", Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
@@ -21,7 +26,7 @@ func TestBuildPlanUsesExistingNodeCapacityBeforeScaling(t *testing.T) {
 		unschedulablePod("pending-b", now, Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
 	}
 
-	plan := BuildPlan(now, nodes, pods, 1, 0, 10, map[string]string{"role": "worker"}, template, time.Minute)
+	plan := BuildPlan(now, nodes, pods, 1, 0, 10, map[string]string{testNodeRoleLabel: testNodeRoleValue}, template, time.Minute)
 
 	if plan.NewNodes != 0 {
 		t.Fatalf("NewNodes = %d, want 0", plan.NewNodes)
@@ -74,16 +79,16 @@ func TestBuildPlanReportsScaleDownPotential(t *testing.T) {
 	now := time.Now()
 	template := Resources{MilliCPU: 2000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}
 	nodes := []corev1.Node{
-		node("node-1", map[string]string{"role": "worker"}, template),
-		node("node-2", map[string]string{"role": "worker"}, template),
-		node("node-3", map[string]string{"role": "worker"}, template),
+		node("node-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+		node("node-2", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+		node("node-3", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
 	}
 	pods := []corev1.Pod{
 		runningPod("used-a", "node-1", Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
 		runningPod("used-b", "node-2", Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
 	}
 
-	plan := BuildPlan(now, nodes, pods, 3, 1, 10, map[string]string{"role": "worker"}, template, time.Minute)
+	plan := BuildPlan(now, nodes, pods, 3, 1, 10, map[string]string{testNodeRoleLabel: testNodeRoleValue}, template, time.Minute)
 
 	if plan.ScaleDownPotentialNodes != 2 {
 		t.Fatalf("ScaleDownPotentialNodes = %d, want 2", plan.ScaleDownPotentialNodes)
@@ -103,15 +108,15 @@ func TestBuildPlanDoesNotReportScaleDownPotentialWithPendingPods(t *testing.T) {
 	now := time.Now()
 	template := Resources{MilliCPU: 2000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}
 	nodes := []corev1.Node{
-		node("node-1", map[string]string{"role": "worker"}, template),
-		node("node-2", map[string]string{"role": "worker"}, template),
+		node("node-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+		node("node-2", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
 	}
 	pods := []corev1.Pod{
 		runningPod("used-a", "node-1", Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
 		unschedulablePod("pending", now, Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
 	}
 
-	plan := BuildPlan(now, nodes, pods, 2, 0, 10, map[string]string{"role": "worker"}, template, time.Minute)
+	plan := BuildPlan(now, nodes, pods, 2, 0, 10, map[string]string{testNodeRoleLabel: testNodeRoleValue}, template, time.Minute)
 
 	if plan.ScaleDownPotentialNodes != 0 {
 		t.Fatalf("ScaleDownPotentialNodes = %d, want 0", plan.ScaleDownPotentialNodes)
@@ -125,14 +130,14 @@ func TestBuildPlanDoesNotReportScaleDownPotentialWhenRunningPodDoesNotFitTemplat
 	now := time.Now()
 	template := Resources{MilliCPU: 1000, Memory: 1024 * 1024 * 1024, Pods: 10}
 	nodes := []corev1.Node{
-		node("node-1", map[string]string{"role": "worker"}, Resources{MilliCPU: 4000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}),
-		node("node-2", map[string]string{"role": "worker"}, Resources{MilliCPU: 4000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}),
+		node("node-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, Resources{MilliCPU: 4000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}),
+		node("node-2", map[string]string{testNodeRoleLabel: testNodeRoleValue}, Resources{MilliCPU: 4000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}),
 	}
 	pods := []corev1.Pod{
 		runningPod("large", "node-1", Resources{MilliCPU: 2000, Memory: 1024 * 1024 * 1024, Pods: 1}),
 	}
 
-	plan := BuildPlan(now, nodes, pods, 2, 0, 10, map[string]string{"role": "worker"}, template, time.Minute)
+	plan := BuildPlan(now, nodes, pods, 2, 0, 10, map[string]string{testNodeRoleLabel: testNodeRoleValue}, template, time.Minute)
 
 	if plan.ScaleDownPotentialNodes != 0 {
 		t.Fatalf("ScaleDownPotentialNodes = %d, want 0", plan.ScaleDownPotentialNodes)
@@ -146,15 +151,15 @@ func TestBuildPlanScaleDownRespectsMinSize(t *testing.T) {
 	now := time.Now()
 	template := Resources{MilliCPU: 2000, Memory: 8 * 1024 * 1024 * 1024, Pods: 10}
 	nodes := []corev1.Node{
-		node("node-1", map[string]string{"role": "worker"}, template),
-		node("node-2", map[string]string{"role": "worker"}, template),
-		node("node-3", map[string]string{"role": "worker"}, template),
+		node("node-1", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+		node("node-2", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
+		node("node-3", map[string]string{testNodeRoleLabel: testNodeRoleValue}, template),
 	}
 	pods := []corev1.Pod{
 		runningPod("used-a", "node-1", Resources{MilliCPU: 500, Memory: 1024 * 1024 * 1024, Pods: 1}),
 	}
 
-	plan := BuildPlan(now, nodes, pods, 3, 2, 10, map[string]string{"role": "worker"}, template, time.Minute)
+	plan := BuildPlan(now, nodes, pods, 3, 2, 10, map[string]string{testNodeRoleLabel: testNodeRoleValue}, template, time.Minute)
 
 	if plan.DesiredTarget != 2 {
 		t.Fatalf("DesiredTarget = %d, want 2", plan.DesiredTarget)
