@@ -1,11 +1,9 @@
 ---
 version: 2
 project_name: terrascaler
-before:
-  hooks:
-    - go mod tidy
 builds:
-  - main: ./cmd/terrascaler
+  - id: terrascaler
+    main: ./cmd/terrascaler
     binary: terrascaler
     env:
       - CGO_ENABLED=0
@@ -21,17 +19,14 @@ dockers:
   - image_templates:
       - ghcr.io/containeroo/terrascaler:{{ .Tag }}-amd64
     use: buildx
-    dockerfile: Dockerfile
-    extra_files:
-      - go.mod
-      - go.sum
-      - cmd
-      - internal
+    dockerfile: Dockerfile.goreleaser
+    ids:
+      - terrascaler
     build_flag_templates:
       - --pull
       - --platform=linux/amd64
-      - --build-arg
-      - LDFLAGS=-s -w -X main.Version={{ .Tag }}
+      - --cache-from=type=gha,scope=terrascaler-amd64
+      - --cache-to=type=gha,mode=max,scope=terrascaler-amd64
       - --label=org.opencontainers.image.title={{ .ProjectName }}
       - --label=org.opencontainers.image.description=External gRPC cloud provider for Kubernetes Cluster Autoscaler backed by GitLab and Terraform/OpenTofu
       - --label=org.opencontainers.image.url=https://github.com/containeroo/terrascaler
@@ -43,18 +38,15 @@ dockers:
   - image_templates:
       - ghcr.io/containeroo/terrascaler:{{ .Tag }}-arm64
     use: buildx
-    dockerfile: Dockerfile
-    extra_files:
-      - go.mod
-      - go.sum
-      - cmd
-      - internal
+    dockerfile: Dockerfile.goreleaser
+    ids:
+      - terrascaler
     goarch: arm64
     build_flag_templates:
       - --pull
       - --platform=linux/arm64
-      - --build-arg
-      - LDFLAGS=-s -w -X main.Version={{ .Tag }}
+      - --cache-from=type=gha,scope=terrascaler-arm64
+      - --cache-to=type=gha,mode=max,scope=terrascaler-arm64
       - --label=org.opencontainers.image.title={{ .ProjectName }}
       - --label=org.opencontainers.image.description=External gRPC cloud provider for Kubernetes Cluster Autoscaler backed by GitLab and Terraform/OpenTofu
       - --label=org.opencontainers.image.url=https://github.com/containeroo/terrascaler
