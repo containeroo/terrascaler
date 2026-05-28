@@ -6,7 +6,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/zclconf/go-cty v1.18.1
-	gitlab.com/gitlab-org/api/client-go/v2 v2.34.0
+	gitlab.com/gitlab-org/api/client-go/v2 v2.36.0
 	k8s.io/api v0.36.1
 	k8s.io/apimachinery v0.36.1
 	k8s.io/client-go v0.36.1
