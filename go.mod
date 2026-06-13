@@ -7,9 +7,9 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/zclconf/go-cty v1.18.1
 	gitlab.com/gitlab-org/api/client-go/v2 v2.39.0
-	k8s.io/api v0.36.1
-	k8s.io/apimachinery v0.36.1
-	k8s.io/client-go v0.36.1
+	k8s.io/api v0.36.2
+	k8s.io/apimachinery v0.36.2
+	k8s.io/client-go v0.36.2
 )
 
 require (
