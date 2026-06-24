@@ -1,5 +1,6 @@
 FROM gcr.io/distroless/static:nonroot
+ARG TARGETPLATFORM
 WORKDIR /
-COPY terrascaler .
+COPY $TARGETPLATFORM/terrascaler .
 USER 65532:65532
 ENTRYPOINT ["/terrascaler"]
